@@ -1,0 +1,42 @@
+name: Sniper Signal Alerts
+
+on:
+  schedule:
+    # Runs every 15 minutes, matching the LTF entry timeframe.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}  # allows manual "Run workflow" button too
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r sniper_bot/requirements.txt
+
+      - name: Run sniper bot
+        working-directory: sniper_bot
+        env:
+          TWELVE_DATA_API_KEY: ${{ secrets.TWELVE_DATA_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          VERBOSE_NO_TRADE: "0"
+        run: python main.py
+
+      # Commit the updated cooldown state back so the next run
+      # (a fresh container) knows what was already alerted.
+      - name: Commit updated state
+        run: |
+          git config user.name "sniper-bot"
+          git config user.email "actions@github.com"
+          git add sniper_bot/state.json
+          git diff --cached --quiet || git commit -m "Update alert cooldown state [skip ci]"
+          git push
