@@ -26,8 +26,8 @@ NEWS_BLACKOUT_MINUTES_BEFORE = 30  # stop alerting this many minutes before the 
 NEWS_BLACKOUT_MINUTES_AFTER = 30   # ...and resume this many minutes after it
 
 # --- Timeframes ---
-HTF_INTERVAL = "4h"     # higher timeframe -> trend bias
-LTF_INTERVAL = "15min"  # lower timeframe -> entry trigger
+HTF_INTERVAL = "15min"   # higher timeframe -> trend bias
+LTF_INTERVAL = "5min"    # lower timeframe -> entry trigger
 CANDLE_COUNT = 150      # bars to pull each run (enough history for swings/ATR)
 
 # --- Structure detection ---
