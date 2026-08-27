@@ -4,7 +4,7 @@ sends it to Telegram.
 """
 
 import requests
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LTF_INTERVAL
+from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LTF_INTERVAL, HTF_INTERVAL
 
 
 def format_signal_message(signal: dict) -> str:
@@ -12,7 +12,7 @@ def format_signal_message(signal: dict) -> str:
         f"🎯 *SNIPER SETUP — {signal['label']}*\n\n"
         f"*Direction:* {signal['direction']}\n"
         f"*Market Bias:* {signal['bias'].upper()}\n"
-        f"*Timeframe:* {LTF_INTERVAL} entry / 4H bias\n\n"
+        f"*Timeframe:* {LTF_INTERVAL} entry / {HTF_INTERVAL} bias\n\n"
         f"*Entry Zone:* {signal['entry_low']:.4f} – {signal['entry_high']:.4f}\n"
         f"*Stop Loss:* {signal['sl']:.4f}\n"
         f"*TP1:* {signal['tp1']:.4f}\n"
