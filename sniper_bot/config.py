@@ -43,12 +43,16 @@ RR_TP3 = 3.0
 
 # --- Confidence scoring weights (must sum to 100) ---
 WEIGHTS = {
-    "bias_alignment": 25,   # LTF setup agrees with HTF trend
-    "zone_quality": 25,     # entry sits at FVG / order block / clean S-R
-    "liquidity_sweep": 25,  # confirmed stop hunt before the move
-    "momentum_confirmation": 25,  # RSI divergence / shift confirms
+    "bias_alignment": 20,        # LTF structure agrees with HTF trend
+    "zone_quality": 20,          # entry sits at FVG / order block
+    "liquidity_sweep": 20,       # confirmed stop hunt before the move
+    "momentum_confirmation": 20, # RSI divergence / shift confirms
+    "chart_pattern": 20,         # confirmed classic pattern (double top/bottom, H&S, triangle)
 }
 MIN_CONFIDENCE_TO_ALERT = 70  # below this -> NO TRADE, even if some confluence exists
+
+# --- Chart pattern detection ---
+PATTERN_LEVEL_TOLERANCE = 0.002  # % tolerance for two price levels to count as "equal" (double top/bottom, shoulders)
 
 # --- Alert throttling ---
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
