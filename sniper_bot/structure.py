@@ -5,7 +5,6 @@ Change of Character (CHoCH), and higher-timeframe trend bias.
 
 import pandas as pd
 from config import SWING_LOOKBACK
-from indicators import ema
 
 
 def find_swings(df: pd.DataFrame, lookback: int = SWING_LOOKBACK):
@@ -28,21 +27,40 @@ def find_swings(df: pd.DataFrame, lookback: int = SWING_LOOKBACK):
 
 def htf_bias(df: pd.DataFrame) -> str:
     """
-    Simple, robust HTF trend read: EMA50 vs EMA200 slope + price position.
+    Structure-based HTF trend read (replaces the old EMA-crossover version,
+    which lagged behind sharp reversals because moving averages are slow
+    to catch up after a strong break of structure).
+
+    Priority order:
+      1. A fresh BOS/CHoCH on this timeframe -> that direction, immediately.
+         This is what lets the engine react to a sharp reversal (like a
+         V-shaped bounce breaking back above a swing high) without waiting
+         for a moving average to turn.
+      2. No fresh break -> fall back to the broader swing sequence (higher
+         highs/higher lows = bullish, lower highs/lower lows = bearish).
+      3. Neither condition is clean -> 'ranging'.
+
     Returns 'bullish', 'bearish', or 'ranging'.
     """
-    if len(df) < 60:
+    if len(df) < 20:
         return "ranging"
-    fast = ema(df["close"], 20)
-    slow = ema(df["close"], 50)
-    price = df["close"].iloc[-1]
 
-    fast_now, fast_prev = fast.iloc[-1], fast.iloc[-5]
-    slow_now = slow.iloc[-1]
+    highs, lows = find_swings(df)
+    if len(highs) < 2 or len(lows) < 2:
+        return "ranging"
 
-    if price > slow_now and fast_now > fast_prev and fast_now > slow_now:
+    structure_event = detect_bos_choch(df, highs, lows)
+    if structure_event in ("bos_bullish", "choch_bullish"):
         return "bullish"
-    if price < slow_now and fast_now < fast_prev and fast_now < slow_now:
+    if structure_event in ("bos_bearish", "choch_bearish"):
+        return "bearish"
+
+    last_high, prev_high = highs[-1][1], highs[-2][1]
+    last_low, prev_low = lows[-1][1], lows[-2][1]
+
+    if last_high > prev_high and last_low > prev_low:
+        return "bullish"
+    if last_high < prev_high and last_low < prev_low:
         return "bearish"
     return "ranging"
 
