@@ -11,6 +11,7 @@ from structure import find_swings, htf_bias, detect_bos_choch
 from liquidity import detect_liquidity_sweep
 from zones import find_fvgs, find_last_order_block, price_in_zone
 from momentum import check_momentum_confirmation
+from chart_patterns import check_chart_pattern
 
 
 NO_TRADE = {"decision": "NO_TRADE"}
@@ -47,6 +48,7 @@ def evaluate_pair(label: str, htf_df, ltf_df) -> dict:
     zone_hit = in_ob or in_fvg
 
     momentum = check_momentum_confirmation(ltf_df, ltf_lows, ltf_highs, direction)
+    pattern_check = check_chart_pattern(ltf_df, ltf_highs, ltf_lows, direction)
 
     # --- Confluence scoring ---
     score = 0
@@ -68,6 +70,10 @@ def evaluate_pair(label: str, htf_df, ltf_df) -> dict:
     if momentum["confirmed"]:
         score += WEIGHTS["momentum_confirmation"]
         reasons.append(momentum["reason"])
+
+    if pattern_check["confirmed"]:
+        score += WEIGHTS["chart_pattern"]
+        reasons.append(pattern_check["reason"])
 
     if score < MIN_CONFIDENCE_TO_ALERT:
         return {
