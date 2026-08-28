@@ -86,8 +86,16 @@ def evaluate_pair(label: str, htf_df, ltf_df) -> dict:
 
     entry_mid = (entry_low + entry_high) / 2
 
+    # Only use the sweep's wick as an SL anchor if it's actually the RIGHT
+    # kind of sweep for this direction (sweep_aligned). An unaligned sweep
+    # (e.g. a buy_side sweep found while direction is bullish) belongs to
+    # an unrelated setup and its wick price is not a meaningful invalidation
+    # level here — using it regardless of alignment could anchor the SL to
+    # an arbitrary, unrelated price far from the actual entry.
+    aligned_wick = sweep["wick_extreme"] if sweep_aligned else None
+
     if direction == "bullish":
-        invalidation = min(entry_low, sweep["wick_extreme"] or entry_low) - (a * SL_ATR_BUFFER)
+        invalidation = min(entry_low, aligned_wick or entry_low) - (a * SL_ATR_BUFFER)
         sl = invalidation
         risk = entry_mid - sl
         tp1 = entry_mid + risk * RR_TP1
@@ -95,7 +103,7 @@ def evaluate_pair(label: str, htf_df, ltf_df) -> dict:
         tp3 = entry_mid + risk * RR_TP3
         trade_direction = "BUY"
     else:
-        invalidation = max(entry_high, sweep["wick_extreme"] or entry_high) + (a * SL_ATR_BUFFER)
+        invalidation = max(entry_high, aligned_wick or entry_high) + (a * SL_ATR_BUFFER)
         sl = invalidation
         risk = sl - entry_mid
         tp1 = entry_mid - risk * RR_TP1
