@@ -12,8 +12,9 @@ Run on schedule via GitHub Actions (see .github/workflows/sniper_alerts.yml)
 import os
 import time
 import traceback
+import pandas as pd
 
-from config import PAIRS, HTF_INTERVAL, LTF_INTERVAL
+from config import PAIRS, HTF_INTERVAL, LTF_INTERVAL, COOLDOWN_BARS
 from data_fetcher import fetch_candles
 from signal_engine import evaluate_pair
 from telegram_bot import format_signal_message, format_no_trade_message, send_telegram_message
@@ -21,6 +22,11 @@ from state import load_state, save_state, should_alert, mark_alerted
 from news_filter import is_in_news_blackout
 
 VERBOSE_NO_TRADE = os.environ.get("VERBOSE_NO_TRADE", "0") == "1"
+
+# Cooldown expressed as real elapsed time (COOLDOWN_BARS worth of LTF
+# candles), since live runs don't share a persistent bar index across
+# separate process invocations — see state.py for why.
+COOLDOWN_GAP = pd.Timedelta(LTF_INTERVAL) * COOLDOWN_BARS
 
 
 def run():
@@ -45,11 +51,11 @@ def run():
             result = evaluate_pair(label, htf_df, ltf_df)
 
             if result["decision"] == "TRADE":
-                bar_index = len(ltf_df) - 1
-                if should_alert(state, symbol, result["direction"], bar_index):
+                latest_time = ltf_df.iloc[-1]["datetime"]
+                if should_alert(state, symbol, result["direction"], latest_time, COOLDOWN_GAP):
                     msg = format_signal_message(result)
                     send_telegram_message(msg)
-                    mark_alerted(state, symbol, result["direction"], bar_index)
+                    mark_alerted(state, symbol, result["direction"], latest_time)
                     print(f"[ALERTED] {label}: {result['direction']} confidence={result['confidence']}")
                 else:
                     print(f"[SKIPPED-COOLDOWN] {label}: {result['direction']} already alerted recently")
