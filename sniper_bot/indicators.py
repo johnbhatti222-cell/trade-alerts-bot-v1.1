@@ -17,7 +17,20 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
 
     rs = avg_gain / avg_loss.replace(0, np.nan)
     result = 100 - (100 / (1 + rs))
-    result = result.fillna(50)  # neutral until enough data
+
+    # avg_loss == 0 means zero losses over the lookback window (a pure
+    # trending move) — this makes rs = inf, which the code above turns
+    # into NaN via the replace(0, nan) guard against real division errors.
+    # That NaN was previously being silently filled to a neutral 50,
+    # which is wrong: zero losses means RSI should read 100 (maximally
+    # overbought), not neutral — exactly the condition momentum
+    # confirmation most needs to detect. Only truly flat, no-movement
+    # data (avg_gain also 0) is genuinely neutral.
+    zero_loss = avg_loss == 0
+    result = result.mask(zero_loss & (avg_gain > 0), 100.0)
+    result = result.mask(zero_loss & (avg_gain == 0), 50.0)
+
+    result = result.fillna(50)  # neutral only during the warm-up period (insufficient data)
     return result
 
 
