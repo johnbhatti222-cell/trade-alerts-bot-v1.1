@@ -2,8 +2,9 @@ name: Sniper Signal Alerts
 
 on:
   schedule:
-    # Runs every 5 minutes, matching the LTF entry timeframe.
-    - cron: "*/5 * * * *"
+    # Runs every 15 minutes. Chosen to stay within Twelve Data's free-tier
+    # 800 calls/day cap: 6 calls/run (2 per pair x 3 pairs) x 96 runs/day = 576/day.
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}  # allows manual "Run workflow" button too
 
 permissions:
