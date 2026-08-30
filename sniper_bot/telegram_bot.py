@@ -7,11 +7,17 @@ import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, LTF_INTERVAL, HTF_INTERVAL
 
 
+TIER_EMOJI = {"A+": "🎯🔥", "A": "🎯", "B": "🔹", "C": "⚪"}
+
+
 def format_signal_message(signal: dict) -> str:
+    tier = signal.get("tier", "?")
+    emoji = TIER_EMOJI.get(tier, "🎯")
     return (
-        f"🎯 *SNIPER SETUP — {signal['label']}*\n\n"
+        f"{emoji} *SNIPER SETUP [{tier}] — {signal['label']}*\n\n"
         f"*Direction:* {signal['direction']}\n"
         f"*Market Bias:* {signal['bias'].upper()}\n"
+        f"*Session:* {signal.get('session', 'unknown')}\n"
         f"*Timeframe:* {LTF_INTERVAL} entry / {HTF_INTERVAL} bias\n\n"
         f"*Entry Zone:* {signal['entry_low']:.4f} – {signal['entry_high']:.4f}\n"
         f"*Stop Loss:* {signal['sl']:.4f}\n"
@@ -19,7 +25,7 @@ def format_signal_message(signal: dict) -> str:
         f"*TP2:* {signal['tp2']:.4f}\n"
         f"*TP3:* {signal['tp3']:.4f}\n"
         f"*Risk:Reward (to TP2):* 1:{signal['rr']:.1f}\n\n"
-        f"*Confidence Score:* {signal['confidence']}/100\n"
+        f"*Confidence Score:* {signal['confidence']}/100 (Tier {tier})\n"
         f"*Invalidation Level:* {signal['invalidation']:.4f}\n"
         f"*Structural Event:* {signal['structure_event']}\n\n"
         f"*Confluences:*\n" + "\n".join(f"• {r}" for r in signal["reasons"]) + "\n\n"
