@@ -19,10 +19,11 @@ from config import PAIRS
 from data_fetcher import fetch_candles
 from backtest import run_backtest, compute_stats, filter_alertable
 
-# Keep a reference to the current (new) bias function so we can restore it
-# after temporarily monkey-patching signal_engine to use the old one.
-NEW_BIAS_FN = structure.htf_bias
-OLD_BIAS_FN = legacy_bias.htf_bias_ema
+# structure.htf_bias is EMA-crossover (currently live).
+# legacy_bias.htf_bias_structure is BOS/CHoCH + swing sequence (not live —
+# tested worse in a real-data comparison; kept here for future re-testing).
+LIVE_BIAS_FN = structure.htf_bias
+ALT_BIAS_FN = legacy_bias.htf_bias_structure
 
 
 def run_one(symbol: str, label: str, ltf_df: pd.DataFrame, bias_fn) -> dict:
@@ -58,27 +59,27 @@ def main():
     else:
         pairs = PAIRS
 
-    combined_old = []
-    combined_new = []
+    combined_live = []
+    combined_alt = []
 
-    print(f"{'Pair':<20} {'OLD (EMA bias)':<55} {'NEW (structure bias)'}")
+    print(f"{'Pair':<20} {'LIVE (EMA bias)':<55} {'ALT (structure bias)'}")
     print("-" * 130)
 
     for pair in pairs:
         symbol, label = pair["symbol"], pair["label"]
         ltf_df = fetch_candles(symbol, "5min", outputsize=args.bars)
 
-        old_stats = run_one(symbol, label, ltf_df, OLD_BIAS_FN)
-        new_stats = run_one(symbol, label, ltf_df, NEW_BIAS_FN)
+        live_stats = run_one(symbol, label, ltf_df, LIVE_BIAS_FN)
+        alt_stats = run_one(symbol, label, ltf_df, ALT_BIAS_FN)
 
-        print(f"{label:<20} {fmt(old_stats):<55} {fmt(new_stats)}")
+        print(f"{label:<20} {fmt(live_stats):<55} {fmt(alt_stats)}")
 
-        if old_stats.get("n", 0) > 0:
-            combined_old.append(old_stats)
-        if new_stats.get("n", 0) > 0:
-            combined_new.append(new_stats)
+        if live_stats.get("n", 0) > 0:
+            combined_live.append(live_stats)
+        if alt_stats.get("n", 0) > 0:
+            combined_alt.append(alt_stats)
 
-    signal_engine.htf_bias = NEW_BIAS_FN  # always leave it restored to current/live behavior
+    signal_engine.htf_bias = LIVE_BIAS_FN  # always leave it restored to current/live behavior
 
     def combine(stat_list):
         if not stat_list:
@@ -90,7 +91,7 @@ def main():
         return f"{n} trades, {win_rate:.1f}% win, total R {total_r:+.2f}"
 
     print("-" * 130)
-    print(f"{'COMBINED':<20} {combine(combined_old):<55} {combine(combined_new)}")
+    print(f"{'COMBINED':<20} {combine(combined_live):<55} {combine(combined_alt)}")
 
 
 if __name__ == "__main__":
