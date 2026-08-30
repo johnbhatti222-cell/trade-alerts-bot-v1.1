@@ -20,16 +20,17 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from config import LTF_INTERVAL, HTF_INTERVAL, COOLDOWN_BARS
+from config import LTF_INTERVAL, HTF_INTERVAL, COOLDOWN_BARS, MIN_TIER_TO_ALERT
 from data_fetcher import fetch_candles
 from signal_engine import evaluate_pair
+from tiering import meets_minimum
 
 # How many LTF bars of trailing history the engine gets to look at,
 # same as the live bot's CANDLE_COUNT — keeps backtest behaviour
 # identical to production.
 ENGINE_WINDOW = 150
 MAX_HOLD_BARS = 200          # give up on an open trade after this many bars
-HTF_RESAMPLE_RULE = "4h"     # must match HTF_INTERVAL's timeframe
+HTF_RESAMPLE_RULE = "15min"  # must match HTF_INTERVAL's timeframe
 
 
 def resample_to_htf(ltf_df: pd.DataFrame, rule: str = HTF_RESAMPLE_RULE) -> pd.DataFrame:
@@ -74,14 +75,33 @@ def simulate_trade(future_df: pd.DataFrame, signal: dict) -> dict:
     return {"outcome": "timeout", "r": 0.0}
 
 
+# How many trailing HTF bars evaluate_pair() gets to look at — matches
+# CANDLE_COUNT in config.py (what the live bot actually fetches each run),
+# so backtest behavior mirrors production instead of growing unboundedly.
+HTF_WINDOW_CAP = 150
+
+
 def run_backtest(symbol: str, label: str, ltf_df: pd.DataFrame) -> pd.DataFrame:
     trades = []
     last_alert_bar = {"BUY": -999, "SELL": -999}
 
+    # Precompute the full HTF resample ONCE (not once per bar — that was
+    # the O(n^2) bottleneck). Completed HTF bars never change once formed,
+    # so it's safe to reuse this and just slice up to "now" for each bar.
+    full_htf_df = resample_to_htf(ltf_df)
+    htf_bucket_starts = full_htf_df["datetime"].values
+
     start = ENGINE_WINDOW + 20  # need enough history before we start evaluating
     for i in range(start, len(ltf_df) - 1):
         window = ltf_df.iloc[max(0, i - ENGINE_WINDOW): i + 1].reset_index(drop=True)
-        htf_window = resample_to_htf(ltf_df.iloc[: i + 1])
+
+        current_time = ltf_df.iloc[i]["datetime"]
+        bucket_start = current_time.floor(HTF_RESAMPLE_RULE)
+        # Only HTF bars that fully closed before the current bucket started
+        # are usable — this is what actually prevents lookahead.
+        idx = htf_bucket_starts.searchsorted(bucket_start, side="left")
+        htf_window = full_htf_df.iloc[max(0, idx - HTF_WINDOW_CAP): idx]
+
         if len(htf_window) < 60:
             continue
 
@@ -101,6 +121,8 @@ def run_backtest(symbol: str, label: str, ltf_df: pd.DataFrame) -> pd.DataFrame:
             "bar_index": i,
             "direction": direction,
             "confidence": result["confidence"],
+            "tier": result["tier"],
+            "session": result["session"],
             "entry_low": result["entry_low"],
             "entry_high": result["entry_high"],
             "sl": result["sl"],
@@ -115,34 +137,79 @@ def run_backtest(symbol: str, label: str, ltf_df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(trades)
 
 
-def summarize(trades: pd.DataFrame, total_bars: int):
+def compute_stats(trades: pd.DataFrame, total_bars: int) -> dict:
+    """Pure stats computation, reusable by both the CLI and the bias comparison script."""
     if trades.empty:
-        print("No trades were triggered over this dataset — engine stayed flat throughout.")
-        return
+        return {"n": 0, "total_bars": total_bars}
 
     n = len(trades)
-    wins = (trades["r_multiple"] > 0).sum()
-    losses = (trades["r_multiple"] < 0).sum()
-    timeouts = (trades["r_multiple"] == 0).sum()
+    wins = int((trades["r_multiple"] > 0).sum())
+    losses = int((trades["r_multiple"] < 0).sum())
+    timeouts = int((trades["r_multiple"] == 0).sum())
     win_rate = wins / n * 100
-    total_r = trades["r_multiple"].sum()
-    avg_r = trades["r_multiple"].mean()
+    total_r = float(trades["r_multiple"].sum())
+    avg_r = float(trades["r_multiple"].mean())
 
     equity = trades["r_multiple"].cumsum()
     running_max = equity.cummax()
     drawdown = equity - running_max
-    max_dd = drawdown.min()
+    max_dd = float(drawdown.min())
 
-    print("\n=== BACKTEST SUMMARY ===")
-    print(f"Bars scanned:        {total_bars}")
-    print(f"Trades triggered:    {n}  ({n / total_bars * 100:.2f}% of bars — engine mostly said NO TRADE)")
-    print(f"Wins / Losses / TO:  {wins} / {losses} / {timeouts}")
-    print(f"Win rate:            {win_rate:.1f}%")
-    print(f"Total R:             {total_r:.2f}")
-    print(f"Average R / trade:   {avg_r:.2f}")
-    print(f"Max drawdown (R):    {max_dd:.2f}")
-    print(f"By outcome:\n{trades['outcome'].value_counts()}")
+    return {
+        "n": n, "total_bars": total_bars, "wins": wins, "losses": losses,
+        "timeouts": timeouts, "win_rate": win_rate, "total_r": total_r,
+        "avg_r": avg_r, "max_dd": max_dd, "equity": equity,
+    }
 
+
+def filter_alertable(trades: pd.DataFrame) -> pd.DataFrame:
+    """
+    Filters to only the trades that would actually reach Telegram live —
+    i.e. tier >= MIN_TIER_TO_ALERT. Sub-threshold tiers (typically C) are
+    still computed and recorded for the tier-comparison breakdown, but
+    including them in the headline stats would overstate real trade
+    frequency and dilute win-rate/R numbers with setups nobody ever acts on.
+    """
+    if trades.empty or "tier" not in trades.columns:
+        return trades
+    mask = trades["tier"].apply(lambda t: meets_minimum(t, MIN_TIER_TO_ALERT))
+    return trades[mask].reset_index(drop=True)
+
+
+def summarize(trades: pd.DataFrame, total_bars: int):
+    alerted = filter_alertable(trades)
+    stats = compute_stats(alerted, total_bars)
+    if stats["n"] == 0:
+        print(f"No trades met the {MIN_TIER_TO_ALERT} tier threshold — engine stayed flat throughout "
+              f"(from the user's perspective; {len(trades)} sub-threshold setups were scored but never alerted).")
+        return
+
+    print("\n=== BACKTEST SUMMARY (alerted trades only, tier >= " + MIN_TIER_TO_ALERT + ") ===")
+    print(f"Bars scanned:        {stats['total_bars']}")
+    print(f"Trades alerted:      {stats['n']}  ({stats['n'] / total_bars * 100:.2f}% of bars)")
+    if len(trades) > stats["n"]:
+        print(f"  (of {len(trades)} total setups scored; {len(trades) - stats['n']} were sub-threshold and never alerted)")
+    print(f"Wins / Losses / TO:  {stats['wins']} / {stats['losses']} / {stats['timeouts']}")
+    print(f"Win rate:            {stats['win_rate']:.1f}%")
+    print(f"Total R:             {stats['total_r']:.2f}")
+    print(f"Average R / trade:   {stats['avg_r']:.2f}")
+    print(f"Max drawdown (R):    {stats['max_dd']:.2f}")
+    print(f"By outcome:\n{alerted['outcome'].value_counts()}")
+
+    if "tier" in trades.columns:
+        print("\nBy tier, ALL scored setups including sub-threshold (does higher conviction actually perform better?):")
+        for tier_name in ["A+", "A", "B", "C"]:
+            tier_trades = trades[trades["tier"] == tier_name]
+            if len(tier_trades) == 0:
+                continue
+            t_wins = (tier_trades["r_multiple"] > 0).sum()
+            t_win_rate = t_wins / len(tier_trades) * 100
+            t_total_r = tier_trades["r_multiple"].sum()
+            t_avg_r = tier_trades["r_multiple"].mean()
+            print(f"  {tier_name:<3} — {len(tier_trades)} trades, {t_win_rate:.1f}% win, "
+                  f"total R {t_total_r:+.2f}, avg R {t_avg_r:+.2f}")
+
+    equity = stats["equity"]
     plt.figure(figsize=(10, 5))
     plt.plot(equity.values)
     plt.title("Equity Curve (cumulative R multiples)")
