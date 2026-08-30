@@ -41,18 +41,34 @@ RR_TP1 = 1.0
 RR_TP2 = 2.0
 RR_TP3 = 3.0
 
-# --- Confidence scoring weights (must sum to 100) ---
+# --- Confluence scoring weights (must sum to 100) ---
+# Restructured into 4 genuinely independent categories instead of 5 —
+# RSI divergence and chart-pattern breaks were found to often reflect
+# the SAME underlying price swing rather than independent evidence, so
+# they're merged into one "confirmation" category (best of the two,
+# not both credited) to avoid double-counting a single event as two
+# separate votes.
 WEIGHTS = {
-    "bias_alignment": 20,        # LTF structure agrees with HTF trend
-    "zone_quality": 20,          # entry sits at FVG / order block
-    "liquidity_sweep": 20,       # confirmed stop hunt before the move
-    "momentum_confirmation": 20, # RSI divergence / shift confirms
-    "chart_pattern": 20,         # confirmed classic pattern (double top/bottom, H&S, triangle)
+    "trend_alignment": 25,  # LTF structure agrees with HTF bias
+    "location": 25,         # price at a matching order block / FVG
+    "trigger": 25,          # direction-aligned liquidity sweep
+    "confirmation": 25,     # RSI divergence/shift OR a confirmed chart pattern (best of, not both)
 }
-MIN_CONFIDENCE_TO_ALERT = 70  # below this -> NO TRADE, even if some confluence exists
 
 # --- Chart pattern detection ---
 PATTERN_LEVEL_TOLERANCE = 0.002  # % tolerance for two price levels to count as "equal" (double top/bottom, shoulders)
+
+# --- Market sessions (UTC hours), used for tiering, not scoring ---
+SESSION_LONDON = (7, 16)
+SESSION_NY = (12, 21)
+SESSION_OVERLAP = (12, 16)  # highest-liquidity window
+
+# --- Tiering ---
+# Replaces the old single MIN_CONFIDENCE_TO_ALERT cutoff with a graded
+# output (see tiering.py). This is the minimum tier actually sent to
+# Telegram — lower tiers are still computed and logged, just not pushed,
+# so you can see what's happening without being spammed by weak setups.
+MIN_TIER_TO_ALERT = "B"
 
 # --- Alert throttling ---
 STATE_FILE = os.path.join(os.path.dirname(__file__), "state.json")
