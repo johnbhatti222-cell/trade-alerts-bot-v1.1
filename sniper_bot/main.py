@@ -1,9 +1,9 @@
 """
 Entry point. For each configured pair:
   1. Pull HTF + LTF candles from Twelve Data
-  2. Run the sniper confluence engine
-  3. If a high-confidence setup exists (and isn't in cooldown) -> send Telegram alert
-  4. Otherwise -> log NO TRADE (only sent to Telegram if VERBOSE_NO_TRADE=1)
+  2. Run the sniper confluence engine (returns a graded tier: A+/A/B/C, or None)
+  3. If the tier meets MIN_TIER_TO_ALERT (and isn't in cooldown) -> send Telegram alert
+  4. Otherwise -> log it (only sent to Telegram if VERBOSE_NO_TRADE=1)
 
 Run manually with: python main.py
 Run on schedule via GitHub Actions (see .github/workflows/sniper_alerts.yml)
@@ -14,12 +14,13 @@ import time
 import traceback
 import pandas as pd
 
-from config import PAIRS, HTF_INTERVAL, LTF_INTERVAL, COOLDOWN_BARS
+from config import PAIRS, HTF_INTERVAL, LTF_INTERVAL, COOLDOWN_BARS, MIN_TIER_TO_ALERT
 from data_fetcher import fetch_candles
 from signal_engine import evaluate_pair
 from telegram_bot import format_signal_message, format_no_trade_message, send_telegram_message
 from state import load_state, save_state, should_alert, mark_alerted
 from news_filter import is_in_news_blackout
+from tiering import meets_minimum
 
 VERBOSE_NO_TRADE = os.environ.get("VERBOSE_NO_TRADE", "0") == "1"
 
@@ -51,12 +52,22 @@ def run():
             result = evaluate_pair(label, htf_df, ltf_df)
 
             if result["decision"] == "TRADE":
+                tier = result["tier"]
+                if not meets_minimum(tier, MIN_TIER_TO_ALERT):
+                    print(f"[TIER TOO LOW] {label}: {result['direction']} tier={tier} confidence={result['confidence']} "
+                          f"session={result['session']} — below MIN_TIER_TO_ALERT={MIN_TIER_TO_ALERT}")
+                    if VERBOSE_NO_TRADE:
+                        send_telegram_message(format_no_trade_message(
+                            label, f"tier {tier} (confidence {result['confidence']}, session {result['session']}) "
+                                   f"— below the {MIN_TIER_TO_ALERT} minimum to alert"))
+                    continue
+
                 latest_time = ltf_df.iloc[-1]["datetime"]
                 if should_alert(state, symbol, result["direction"], latest_time, COOLDOWN_GAP):
                     msg = format_signal_message(result)
                     send_telegram_message(msg)
                     mark_alerted(state, symbol, result["direction"], latest_time)
-                    print(f"[ALERTED] {label}: {result['direction']} confidence={result['confidence']}")
+                    print(f"[ALERTED] {label}: {result['direction']} tier={tier} confidence={result['confidence']}")
                 else:
                     print(f"[SKIPPED-COOLDOWN] {label}: {result['direction']} already alerted recently")
             else:
